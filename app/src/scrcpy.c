@@ -790,8 +790,13 @@ aoa_complete:
             mp = &s->mouse_uhid.mouse_processor;
         }
 
-        if (options->gamepad_input_mode == SC_GAMEPAD_INPUT_MODE_UHID) {
-            sc_gamepad_uhid_init(&s->gamepad_uhid, &s->controller);
+        if (options->gamepad_input_mode == SC_GAMEPAD_INPUT_MODE_UHID
+                || options->gamepad_input_mode
+                        == SC_GAMEPAD_INPUT_MODE_UHID_XBOX) {
+            bool xbox_wireless =
+                options->gamepad_input_mode == SC_GAMEPAD_INPUT_MODE_UHID_XBOX;
+            sc_gamepad_uhid_init(&s->gamepad_uhid, &s->controller,
+                                 xbox_wireless);
             gp = &s->gamepad_uhid.gamepad_processor;
         }
 

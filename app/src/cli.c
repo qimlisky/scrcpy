@@ -418,10 +418,15 @@ static const struct sc_option options[] = {
         .longopt = "gamepad",
         .argdesc = "mode",
         .text = "Select how to send gamepad inputs to the device.\n"
-                "Possible values are \"disabled\", \"uhid\" and \"aoa\".\n"
+                "Possible values are \"disabled\", \"uhid\", \"xbox\" and "
+                "\"aoa\".\n"
                 "\"disabled\" does not send gamepad inputs to the device.\n"
                 "\"uhid\" simulates physical HID gamepads using the Linux UHID "
                 "kernel module on the device.\n"
+                "\"xbox\" is like \"uhid\", but the virtual gamepad is "
+                "presented as an Xbox Wireless Controller, which is required "
+                "by some games (e.g. Honkai: Star Rail on Android) to enable "
+                "controller support.\n"
                 "\"aoa\" simulates physical gamepads using the AOAv2 protocol."
                 "It may only work over USB.\n"
                 "Also see --keyboard and --mouse.",
@@ -2273,6 +2278,11 @@ parse_gamepad(const char *optarg, enum sc_gamepad_input_mode *mode) {
         return true;
     }
 
+    if (!strcmp(optarg, "xbox")) {
+        *mode = SC_GAMEPAD_INPUT_MODE_UHID_XBOX;
+        return true;
+    }
+
     if (!strcmp(optarg, "aoa")) {
 #ifdef HAVE_USB
         *mode = SC_GAMEPAD_INPUT_MODE_AOA;
@@ -2283,7 +2293,8 @@ parse_gamepad(const char *optarg, enum sc_gamepad_input_mode *mode) {
 #endif
     }
 
-    LOGE("Unsupported gamepad: %s (expected disabled or aoa)", optarg);
+    LOGE("Unsupported gamepad: %s (expected disabled, uhid, xbox or aoa)",
+         optarg);
     return false;
 }
 

@@ -12,10 +12,12 @@ struct sc_gamepad_uhid {
 
     struct sc_hid_gamepad hid;
     struct sc_controller *controller;
+    bool xbox_wireless; // present the device as an "Xbox Wireless Controller"
 };
 
 void
 sc_gamepad_uhid_init(struct sc_gamepad_uhid *mouse,
-                     struct sc_controller *controller);
+                     struct sc_controller *controller,
+                     bool xbox_wireless);
 
 #endif

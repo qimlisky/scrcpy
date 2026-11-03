@@ -17,6 +17,14 @@
 #define SC_GAMEPAD_UHID_PRODUCT_ID UINT16_C(0x028e)
 #define SC_GAMEPAD_UHID_NAME "Microsoft X-Box 360 Pad"
 
+// Xbox Wireless Controller (modern generation, e.g. Xbox One S / Series X|S).
+// Some Android games (e.g. Honkai: Star Rail) only enable controller support
+// when the connected device is recognized as an "Xbox Wireless Controller",
+// so UHID_CREATE must carry this exact VID/PID/name triplet.
+#define SC_GAMEPAD_UHID_XBOX_VENDOR_ID UINT16_C(0x045e)
+#define SC_GAMEPAD_UHID_XBOX_PRODUCT_ID UINT16_C(0x0b12)
+#define SC_GAMEPAD_UHID_XBOX_NAME "Xbox Wireless Controller"
+
 static void
 sc_gamepad_uhid_send_input(struct sc_gamepad_uhid *gamepad,
                            const struct sc_hid_input *hid_input,
@@ -40,9 +48,15 @@ sc_gamepad_uhid_send_open(struct sc_gamepad_uhid *gamepad,
     struct sc_control_msg msg;
     msg.type = SC_CONTROL_MSG_TYPE_UHID_CREATE;
     msg.uhid_create.id = hid_open->hid_id;
-    msg.uhid_create.vendor_id = SC_GAMEPAD_UHID_VENDOR_ID;
-    msg.uhid_create.product_id = SC_GAMEPAD_UHID_PRODUCT_ID;
-    msg.uhid_create.name = SC_GAMEPAD_UHID_NAME;
+    if (gamepad->xbox_wireless) {
+        msg.uhid_create.vendor_id = SC_GAMEPAD_UHID_XBOX_VENDOR_ID;
+        msg.uhid_create.product_id = SC_GAMEPAD_UHID_XBOX_PRODUCT_ID;
+        msg.uhid_create.name = SC_GAMEPAD_UHID_XBOX_NAME;
+    } else {
+        msg.uhid_create.vendor_id = SC_GAMEPAD_UHID_VENDOR_ID;
+        msg.uhid_create.product_id = SC_GAMEPAD_UHID_PRODUCT_ID;
+        msg.uhid_create.name = SC_GAMEPAD_UHID_NAME;
+    }
     msg.uhid_create.report_desc = hid_open->report_desc;
     msg.uhid_create.report_desc_size = hid_open->report_desc_size;
 
@@ -129,10 +143,12 @@ sc_gamepad_processor_process_gamepad_button(struct sc_gamepad_processor *gp,
 
 void
 sc_gamepad_uhid_init(struct sc_gamepad_uhid *gamepad,
-                     struct sc_controller *controller) {
+                     struct sc_controller *controller,
+                     bool xbox_wireless) {
     sc_hid_gamepad_init(&gamepad->hid);
 
     gamepad->controller = controller;
+    gamepad->xbox_wireless = xbox_wireless;
 
     static const struct sc_gamepad_processor_ops ops = {
         .process_gamepad_added = sc_gamepad_processor_process_gamepad_added,
