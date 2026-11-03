@@ -2,7 +2,8 @@
 > **This GitHub repo (<https://github.com/Genymobile/scrcpy>) is the only official
 source for the project. Do not download releases from random websites, even if
 their name contains `scrcpy`.**
-
+此项目不是官方项目，官方项目在这**https://github.com/Genymobile/scrcpy**  
+本项目仅添加xbox以让 崩坏：星穹铁道 能够识别手柄。添加--gamepad=xbox以启用
 # scrcpy (v5.0.1)
 
 <img src="app/data/scrcpy.svg" width="128" height="128" alt="scrcpy" align="right" />
