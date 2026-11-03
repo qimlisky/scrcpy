@@ -47,13 +47,24 @@ jobs:
           sudo apt install -y meson ninja-build nasm \
              mingw-w64 mingw-w64-tools libz-mingw-w64-dev
 
-      - name: Patch FFmpeg download (Fix GnuTLS SSL issue)
+      - name: Patch wget for GnuTLS SSL issue
         run: |
-          # 给所有 .sh 脚本中的 wget 增加跳过证书验证，并强制使用 TLS 1.2
-          # 避免 GnuTLS 在 TLS 1.3 协商或证书链验证时出错
-          find . -type f -name "*.sh" -exec sed -i 's/wget /wget --no-check-certificate --secure-protocol=TLSv1_2 /g' {} +
-          echo "Patched wget commands in shell scripts:"
-          grep -r "wget " --include="*.sh" . | head -n 5
+          # 在 app/deps/ 下按内容搜索所有含 wget 调用的文件（_init 没有 .sh 扩展名）
+          FILES=$(grep -rl 'wget ' app/deps/ 2>/dev/null || true)
+          if [ -z "$FILES" ]; then
+            echo "Warning: no wget calls found in app/deps/"
+            exit 1
+          fi
+          echo "Patching files:"
+          echo "$FILES"
+          for f in $FILES; do
+            sed -i 's/wget /wget --no-check-certificate --secure-protocol=TLSv1_2 /g' "$f"
+          done
+          echo "--- Verify patches ---"
+          grep -rn 'wget ' app/deps/ | grep -E 'no-check-certificate|secure-protocol' || {
+            echo "Error: patch did not apply"
+            exit 1
+          }
 
       - name: Build
         run: release/build_windows.sh 64
