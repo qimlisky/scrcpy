@@ -9,11 +9,12 @@
 #include "util/log.h"
 
 // 2x2 bytes for left stick (X, Y)
-// 2x2 bytes for right stick (Z, Rz)
+// 3x2 bytes for right stick (Z, Rz, Rx, Ry) -- Z/Rz and Rx/Ry both carry the
+// right stick values for compatibility with games reading either axis set
 // 1 byte for hat switch (dpad)
 // 2 bytes for buttons
 // 2x2 bytes for L2/R2 triggers
-#define SC_HID_GAMEPAD_EVENT_SIZE 15
+#define SC_HID_GAMEPAD_EVENT_SIZE 19
 
 // The ->buttons field stores the state for all buttons, but only some of them
 // (the 16 LSB) must be transmitted "as is". The DPAD (hat switch) buttons are
@@ -62,6 +63,10 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
     0x09, 0x32,
     // Usage (Rz)  Right stick y
     0x09, 0x35,
+    // Usage (Rx)  Right stick x (duplicated for compatibility)
+    0x09, 0x33,
+    // Usage (Ry)  Right stick y (duplicated for compatibility)
+    0x09, 0x34,
     // Logical Minimum (0)
     0x15, 0x00,
     // Logical Maximum (65535)
@@ -69,9 +74,11 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
     0x27, 0xFF, 0xFF, 0x00, 0x00, // little-endian
     // Report Size (16)
     0x75, 0x10,
-    // Report Count (4)
-    0x95, 0x04,
-    // Input (Data, Variable, Absolute): 4x2 bytes (X, Y, Z, Rz)
+    // Report Count (6)
+    0x95, 0x06,
+    // Input (Data, Variable, Absolute): 6x2 bytes (X, Y, Z, Rz, Rx, Ry)
+    // The right stick is reported both on Z/Rz (modern Xbox layout) and on
+    // Rx/Ry, so that games reading either axis set can use it.
     0x81, 0x02,
 
     // Usage Page (Generic Desktop)
@@ -134,15 +141,17 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
 };
 
 /**
- * A gamepad HID input report is 15 bytes long:
+ * A gamepad HID input report is 19 bytes long:
  *  - bytes 0-1:   left stick x
  *  - bytes 2-3:   left stick y
- *  - bytes 4-5:   right stick x
- *  - bytes 6-7:   right stick y
- *  - byte 8:      hat switch position (dpad)
- *  - bytes 9-10:  buttons state
- *  - bytes 11-12: L2 trigger state
- *  - bytes 13-14: R2 trigger state
+ *  - bytes 4-5:   right stick x (Z)
+ *  - bytes 6-7:   right stick y (Rz)
+ *  - bytes 8-9:   right stick x (Rx, duplicate)
+ *  - bytes 10-11: right stick y (Ry, duplicate)
+ *  - byte 12:     hat switch position (dpad)
+ *  - bytes 13-14: buttons state
+ *  - bytes 15-16: L2 trigger state
+ *  - bytes 17-18: R2 trigger state
  *
  *                  +---------------+
  *         byte 0:  |. . . . . . . .|
@@ -161,7 +170,15 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
  *                  |               | right stick y (0-65535, little-endian)
  *         byte 7:  |. . . . . . . .|
  *                  +---------------+
- *         byte 8:  |. . . . . . . .| hat switch (dpad) position (0-8)
+ *         byte 8:  |. . . . . . . .|
+ *                  |               | right stick x (Rx, duplicate)
+ *         byte 9:  |. . . . . . . .|
+ *                  +---------------+
+ *        byte 10:  |. . . . . . . .|
+ *                  |               | right stick y (Ry, duplicate)
+ *        byte 11:  |. . . . . . . .|
+ *                  +---------------+
+ *        byte 12:  |. . . . . . . .| hat switch (dpad) position (0-8)
  *                  +---------------+
  *                     9 possible positions and their values:
  *                             8 1 2
@@ -179,9 +196,9 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
  *                   | |   | |   | ,- SC_GAMEPAD_BUTTON_SOUTH
  *                   v v   v v   v v
  *                  +---------------+
- *        byte 9:   |. . 0 . . 0 . .|
+ *        byte 13:  |. . 0 . . 0 . .|
  *                  |               | Buttons (16-bit little-endian)
- *        byte 10:  |0 . . . . . 0 0|
+ *        byte 14:  |0 . . . . . 0 0|
  *                  +---------------+
  *                     ^ ^ ^ ^ ^
  *                     | | | | |
@@ -193,13 +210,13 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
  *                     `------------- SC_GAMEPAD_BUTTON_RIGHT_STICK
  *
  *                  +---------------+
- *        byte 11:  |. . . . . . . .|
+ *        byte 15:  |. . . . . . . .|
  *                  |               | L2 trigger (0-1023, little-endian)
- *        byte 12:  |0 0 0 0 0 0 . .|
+ *        byte 16:  |0 0 0 0 0 0 . .|
  *                  +---------------+
- *        byte 13:  |. . . . . . . .|
+ *        byte 17:  |. . . . . . . .|
  *                  |               | R2 trigger (0-1023, little-endian)
- *        byte 14:  |0 0 0 0 0 0 . .|
+ *        byte 18:  |0 0 0 0 0 0 . .|
  *                  +---------------+
  */
 
@@ -332,12 +349,16 @@ sc_hid_gamepad_event_from_slot(uint16_t hid_id,
     sc_write16le(data + 2, slot->axis_left_y);
     sc_write16le(data + 4, slot->axis_right_x);
     sc_write16le(data + 6, slot->axis_right_y);
-    data[8] = sc_hid_gamepad_get_dpad_value(slot->buttons);
-    sc_write16le(data + 9, slot->buttons & SC_HID_BUTTONS_MASK);
+    // Duplicate the right stick on Rx/Ry, for games reading these axes
+    // instead of Z/Rz
+    sc_write16le(data + 8, slot->axis_right_x);
+    sc_write16le(data + 10, slot->axis_right_y);
+    data[12] = sc_hid_gamepad_get_dpad_value(slot->buttons);
+    sc_write16le(data + 13, slot->buttons & SC_HID_BUTTONS_MASK);
     // Triggers are scaled from [0, 32767] to [0, 1023] (10-bit, like a real
     // Xbox Wireless Controller)
-    sc_write16le(data + 11, slot->axis_left_trigger >> 5);
-    sc_write16le(data + 13, slot->axis_right_trigger >> 5);
+    sc_write16le(data + 15, slot->axis_left_trigger >> 5);
+    sc_write16le(data + 17, slot->axis_right_trigger >> 5);
 }
 
 static uint32_t
