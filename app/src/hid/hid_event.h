@@ -7,8 +7,8 @@
 #include <stdint.h>
 
 // Max size of a HID input report. The gamepad report is currently the largest
-// (19 bytes), larger than keyboard and mouse reports.
-#define SC_HID_MAX_SIZE 19
+// (23 bytes), larger than keyboard and mouse reports.
+#define SC_HID_MAX_SIZE 23
 
 struct sc_hid_input {
     uint16_t hid_id;
