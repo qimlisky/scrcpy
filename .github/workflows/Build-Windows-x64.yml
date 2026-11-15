@@ -113,6 +113,8 @@ jobs:
       - build-scrcpy-server
       - package-win64
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # 创建 Release 并上传附件需要写权限
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -140,3 +142,15 @@ jobs:
         with:
           name: scrcpy-release-${{ env.VERSION }}
           path: release/output
+
+      # 新增：创建/更新 GitHub Release 并上传构建产物作为附件
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Release ${{ env.VERSION }}
+          files: release/output/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
