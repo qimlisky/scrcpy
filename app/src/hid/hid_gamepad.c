@@ -121,16 +121,26 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
 
     // Usage Page (Generic Desktop)
     0x05, 0x01,
-    // Usage (Slider)  Left trigger (maps to AXIS_LTRIGGER on Android)
+    // Usage (Slider)  Left trigger
     0x09, 0x36,
-    // Usage (Dial)  Right trigger (maps to AXIS_RTRIGGER on Android)
+    // Usage (Dial)  Right trigger
     0x09, 0x37,
     // Usage Page (Simulation Controls)
     0x05, 0x02,
-    // Usage (Brake)  Left trigger (maps to AXIS_BRAKE on Android)
+    // Usage (Brake)  RIGHT trigger (ABS_BRAKE -> AXIS_BRAKE)
     0x0A, 0x31, 0x0C,
-    // Usage (Accelerator)  Right trigger (maps to AXIS_GAS on Android)
+    // Usage (Accelerator)  LEFT trigger (ABS_GAS -> AXIS_GAS)
     0x0A, 0x32, 0x0C,
+    // Physical Minimum (0)
+    // MUST be reset: the hat switch above set Physical {0..315} and
+    // Unit (Degrees), and HID global items are sticky. Without a reset the
+    // trigger axes inherit the "angle" physical range/unit, and the kernel
+    // rescales their values, which makes the triggers look mid-range.
+    0x35, 0x00,
+    // Physical Maximum (1023)
+    0x46, 0xFF, 0x03,
+    // Unit (None)
+    0x65, 0x00,
     // Logical Minimum (0)
     0x15, 0x00,
     // Logical Maximum (1023)
@@ -141,7 +151,7 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
     0x95, 0x04,
     // Input (Data, Variable, Absolute): 4x2 bytes (Slider, Dial, Brake, Accel)
     // The triggers are duplicated on both axis sets so that games reading
-    // either AXIS_LTRIGGER/RTRIGGER or AXIS_BRAKE/AXIS_GAS get the values.
+    // either the throttle/rudder or the brake/accelerator axes get the values.
     0x81, 0x02,
 
     // End Collection
@@ -160,8 +170,8 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
  *  - bytes 13-14: buttons state
  *  - bytes 15-16: L2 trigger (Slider -> AXIS_LTRIGGER)
  *  - bytes 17-18: R2 trigger (Dial -> AXIS_RTRIGGER)
- *  - bytes 19-20: L2 trigger (Brake -> AXIS_BRAKE, duplicate)
- *  - bytes 21-22: R2 trigger (Accelerator -> AXIS_GAS, duplicate)
+ *  - bytes 19-20: R2 trigger (Brake -> AXIS_BRAKE)
+ *  - bytes 21-22: L2 trigger (Accelerator -> AXIS_GAS)
  *
  *                  +---------------+
  *         byte 0:  |. . . . . . . .|
@@ -229,11 +239,11 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
  *        byte 18:  |0 0 0 0 0 0 . .|
  *                  +---------------+
  *        byte 19:  |. . . . . . . .|
- *                  |               | L2 trigger (Brake, duplicate)
+ *                  |               | R2 trigger (Brake, 0-1023, little-endian)
  *        byte 20:  |0 0 0 0 0 0 . .|
  *                  +---------------+
  *        byte 21:  |. . . . . . . .|
- *                  |               | R2 trigger (Accelerator, duplicate)
+ *                  |               | L2 trigger (Accelerator, 0-1023, little-endian)
  *        byte 22:  |0 0 0 0 0 0 . .|
  *                  +---------------+
  */
@@ -374,12 +384,16 @@ sc_hid_gamepad_event_from_slot(uint16_t hid_id,
     data[12] = sc_hid_gamepad_get_dpad_value(slot->buttons);
     sc_write16le(data + 13, slot->buttons & SC_HID_BUTTONS_MASK);
     // Triggers are scaled from [0, 32767] to [0, 1023] (10-bit, like a real
-    // Xbox Wireless Controller). They are written twice: on Slider/Dial
-    // (AXIS_LTRIGGER/RTRIGGER) and on Brake/Accelerator (AXIS_BRAKE/AXIS_GAS).
+    // Xbox Wireless Controller).
+    // Slider/Dial carry LT/RT (these map to AXIS_THROTTLE/AXIS_RUDDER on
+    // Android, kept only for completeness).
     sc_write16le(data + 15, slot->axis_left_trigger >> 5);
     sc_write16le(data + 17, slot->axis_right_trigger >> 5);
-    sc_write16le(data + 19, slot->axis_left_trigger >> 5);
-    sc_write16le(data + 21, slot->axis_right_trigger >> 5);
+    // The Simulation axes follow the real Xbox / SDL convention:
+    // Accelerator (ABS_GAS) is the LEFT trigger, Brake (ABS_BRAKE) is the
+    // RIGHT trigger. Writing them the other way round swaps LT and RT.
+    sc_write16le(data + 19, slot->axis_right_trigger >> 5); // Brake = RT
+    sc_write16le(data + 21, slot->axis_left_trigger >> 5);  // Accelerator = LT
 }
 
 static uint32_t
