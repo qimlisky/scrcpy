@@ -9,12 +9,11 @@
 #include "util/log.h"
 
 // 2x2 bytes for left stick (X, Y)
-// 3x2 bytes for right stick (Z, Rz, Rx, Ry) -- Z/Rz and Rx/Ry both carry the
-// right stick values for compatibility with games reading either axis set
+// 2x2 bytes for right stick (Rx, Ry)
 // 1 byte for hat switch (dpad)
 // 2 bytes for buttons
-// 4x2 bytes for L2/R2 triggers (Slider/Dial + Brake/Accelerator duplicates)
-#define SC_HID_GAMEPAD_EVENT_SIZE 23
+// 4x2 bytes for triggers (Z/Rz + Brake/Accelerator duplicates)
+#define SC_HID_GAMEPAD_EVENT_SIZE 19
 
 // The ->buttons field stores the state for all buttons, but only some of them
 // (the 16 LSB) must be transmitted "as is". The DPAD (hat switch) buttons are
@@ -59,13 +58,9 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
     0x09, 0x30,
     // Usage (Y)   Left stick y
     0x09, 0x31,
-    // Usage (Z)   Right stick x
-    0x09, 0x32,
-    // Usage (Rz)  Right stick y
-    0x09, 0x35,
-    // Usage (Rx)  Right stick x (duplicated for compatibility)
+    // Usage (Rx)  Right stick x
     0x09, 0x33,
-    // Usage (Ry)  Right stick y (duplicated for compatibility)
+    // Usage (Ry)  Right stick y
     0x09, 0x34,
     // Logical Minimum (0)
     0x15, 0x00,
@@ -74,11 +69,12 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
     0x27, 0xFF, 0xFF, 0x00, 0x00, // little-endian
     // Report Size (16)
     0x75, 0x10,
-    // Report Count (6)
-    0x95, 0x06,
-    // Input (Data, Variable, Absolute): 6x2 bytes (X, Y, Z, Rz, Rx, Ry)
-    // The right stick is reported both on Z/Rz (modern Xbox layout) and on
-    // Rx/Ry, so that games reading either axis set can use it.
+    // Report Count (4)
+    0x95, 0x04,
+    // Input (Data, Variable, Absolute): 4x2 bytes (X, Y, Rx, Ry)
+    // IMPORTANT: on Android, the right stick is read from RX/RY (not Z/Rz).
+    // Z/Rz carry the triggers (see below), as in the Android standard
+    // gamepad layout used by SDL's Android backend and by Unity games.
     0x81, 0x02,
 
     // Usage Page (Generic Desktop)
@@ -121,10 +117,10 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
 
     // Usage Page (Generic Desktop)
     0x05, 0x01,
-    // Usage (Slider)  Left trigger
-    0x09, 0x36,
-    // Usage (Dial)  Right trigger
-    0x09, 0x37,
+    // Usage (Z)   LEFT trigger (Android AXIS_Z -> SDL TRIGGERLEFT)
+    0x09, 0x32,
+    // Usage (Rz)  RIGHT trigger (Android AXIS_RZ -> SDL TRIGGERRIGHT)
+    0x09, 0x35,
     // Usage Page (Simulation Controls)
     0x05, 0x02,
     // Usage (Brake)  RIGHT trigger (ABS_BRAKE -> AXIS_BRAKE)
@@ -149,9 +145,10 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
     0x75, 0x10,
     // Report Count (4)
     0x95, 0x04,
-    // Input (Data, Variable, Absolute): 4x2 bytes (Slider, Dial, Brake, Accel)
-    // The triggers are duplicated on both axis sets so that games reading
-    // either the throttle/rudder or the brake/accelerator axes get the values.
+    // Input (Data, Variable, Absolute): 4x2 bytes (Z, Rz, Brake, Accel)
+    // The triggers are duplicated on Z/Rz (Android standard gamepad layout,
+    // read by SDL and Unity games) and on Brake/Accelerator (SDL/real-Xbox
+    // semantics), so that either reading gets the values.
     0x81, 0x02,
 
     // End Collection
@@ -159,19 +156,23 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
 };
 
 /**
- * A gamepad HID input report is 23 bytes long:
+ * A gamepad HID input report is 19 bytes long:
  *  - bytes 0-1:   left stick x
  *  - bytes 2-3:   left stick y
- *  - bytes 4-5:   right stick x (Z)
- *  - bytes 6-7:   right stick y (Rz)
- *  - bytes 8-9:   right stick x (Rx, duplicate)
- *  - bytes 10-11: right stick y (Ry, duplicate)
- *  - byte 12:     hat switch position (dpad)
- *  - bytes 13-14: buttons state
- *  - bytes 15-16: L2 trigger (Slider -> AXIS_LTRIGGER)
- *  - bytes 17-18: R2 trigger (Dial -> AXIS_RTRIGGER)
- *  - bytes 19-20: R2 trigger (Brake -> AXIS_BRAKE)
- *  - bytes 21-22: L2 trigger (Accelerator -> AXIS_GAS)
+ *  - bytes 4-5:   right stick x (Rx)
+ *  - bytes 6-7:   right stick y (Ry)
+ *  - byte 8:      hat switch position (dpad)
+ *  - bytes 9-10:  buttons state
+ *  - bytes 11-12: LEFT trigger (Z, 0-1023)
+ *  - bytes 13-14: RIGHT trigger (Rz, 0-1023)
+ *  - bytes 15-16: RIGHT trigger (Brake, duplicate)
+ *  - bytes 17-18: LEFT trigger (Accelerator, duplicate)
+ *
+ * Layout note (important): Android reads the right stick from RX/RY and the
+ * triggers from Z/Rz. This is the layout SDL's Android backend uses
+ * (AXIS_Z -> TRIGGERLEFT, AXIS_RZ -> TRIGGERRIGHT, AXIS_RX/RY -> right stick)
+ * and it is what Unity games such as Honkai: Star Rail expect. Putting the
+ * right stick on Z/Rz instead makes the game read the sticks as triggers.
  *
  *                  +---------------+
  *         byte 0:  |. . . . . . . .|
@@ -183,22 +184,14 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
  *         byte 3:  |. . . . . . . .|
  *                  +---------------+
  *         byte 4:  |. . . . . . . .|
- *                  |               | right stick x (0-65535, little-endian)
+ *                  |               | right stick x (Rx, 0-65535, little-endian)
  *         byte 5:  |. . . . . . . .|
  *                  +---------------+
  *         byte 6:  |. . . . . . . .|
- *                  |               | right stick y (0-65535, little-endian)
+ *                  |               | right stick y (Ry, 0-65535, little-endian)
  *         byte 7:  |. . . . . . . .|
  *                  +---------------+
- *         byte 8:  |. . . . . . . .|
- *                  |               | right stick x (Rx, duplicate)
- *         byte 9:  |. . . . . . . .|
- *                  +---------------+
- *        byte 10:  |. . . . . . . .|
- *                  |               | right stick y (Ry, duplicate)
- *        byte 11:  |. . . . . . . .|
- *                  +---------------+
- *        byte 12:  |. . . . . . . .| hat switch (dpad) position (0-8)
+ *         byte 8:  |. . . . . . . .| hat switch (dpad) position (0-8)
  *                  +---------------+
  *                     9 possible positions and their values:
  *                             8 1 2
@@ -216,9 +209,9 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
  *                   | |   | |   | ,- SC_GAMEPAD_BUTTON_SOUTH
  *                   v v   v v   v v
  *                  +---------------+
- *        byte 13:  |. . 0 . . 0 . .|
+ *         byte 9:  |. . 0 . . 0 . .|
  *                  |               | Buttons (16-bit little-endian)
- *        byte 14:  |0 . . . . . 0 0|
+ *        byte 10:  |0 . . . . . 0 0|
  *                  +---------------+
  *                     ^ ^ ^ ^ ^
  *                     | | | | |
@@ -230,21 +223,21 @@ static const uint8_t SC_HID_GAMEPAD_REPORT_DESC[] = {
  *                     `------------- SC_GAMEPAD_BUTTON_RIGHT_STICK
  *
  *                  +---------------+
+ *        byte 11:  |. . . . . . . .|
+ *                  |               | LEFT trigger (Z, 0-1023, little-endian)
+ *        byte 12:  |0 0 0 0 0 0 . .|
+ *                  +---------------+
+ *        byte 13:  |. . . . . . . .|
+ *                  |               | RIGHT trigger (Rz, 0-1023, little-endian)
+ *        byte 14:  |0 0 0 0 0 0 . .|
+ *                  +---------------+
  *        byte 15:  |. . . . . . . .|
- *                  |               | L2 trigger (0-1023, little-endian)
+ *                  |               | RIGHT trigger (Brake, duplicate)
  *        byte 16:  |0 0 0 0 0 0 . .|
  *                  +---------------+
  *        byte 17:  |. . . . . . . .|
- *                  |               | R2 trigger (0-1023, little-endian)
+ *                  |               | LEFT trigger (Accelerator, duplicate)
  *        byte 18:  |0 0 0 0 0 0 . .|
- *                  +---------------+
- *        byte 19:  |. . . . . . . .|
- *                  |               | R2 trigger (Brake, 0-1023, little-endian)
- *        byte 20:  |0 0 0 0 0 0 . .|
- *                  +---------------+
- *        byte 21:  |. . . . . . . .|
- *                  |               | L2 trigger (Accelerator, 0-1023, little-endian)
- *        byte 22:  |0 0 0 0 0 0 . .|
  *                  +---------------+
  */
 
@@ -377,23 +370,18 @@ sc_hid_gamepad_event_from_slot(uint16_t hid_id,
     sc_write16le(data + 2, slot->axis_left_y);
     sc_write16le(data + 4, slot->axis_right_x);
     sc_write16le(data + 6, slot->axis_right_y);
-    // Duplicate the right stick on Rx/Ry, for games reading these axes
-    // instead of Z/Rz
-    sc_write16le(data + 8, slot->axis_right_x);
-    sc_write16le(data + 10, slot->axis_right_y);
-    data[12] = sc_hid_gamepad_get_dpad_value(slot->buttons);
-    sc_write16le(data + 13, slot->buttons & SC_HID_BUTTONS_MASK);
+    data[8] = sc_hid_gamepad_get_dpad_value(slot->buttons);
+    sc_write16le(data + 9, slot->buttons & SC_HID_BUTTONS_MASK);
     // Triggers are scaled from [0, 32767] to [0, 1023] (10-bit, like a real
     // Xbox Wireless Controller).
-    // Slider/Dial carry LT/RT (these map to AXIS_THROTTLE/AXIS_RUDDER on
-    // Android, kept only for completeness).
-    sc_write16le(data + 15, slot->axis_left_trigger >> 5);
-    sc_write16le(data + 17, slot->axis_right_trigger >> 5);
-    // The Simulation axes follow the real Xbox / SDL convention:
-    // Accelerator (ABS_GAS) is the LEFT trigger, Brake (ABS_BRAKE) is the
-    // RIGHT trigger. Writing them the other way round swaps LT and RT.
-    sc_write16le(data + 19, slot->axis_right_trigger >> 5); // Brake = RT
-    sc_write16le(data + 21, slot->axis_left_trigger >> 5);  // Accelerator = LT
+    // Android reads the right stick from RX/RY and the triggers from Z/Rz
+    // (standard Android gamepad layout, same as SDL's Android backend and
+    // Unity games). Brake/Accelerator carry the same values with the
+    // SDL/real-Xbox semantics (Accelerator = LT, Brake = RT).
+    sc_write16le(data + 11, slot->axis_left_trigger >> 5);  // Z = LT
+    sc_write16le(data + 13, slot->axis_right_trigger >> 5); // Rz = RT
+    sc_write16le(data + 15, slot->axis_right_trigger >> 5); // Brake = RT
+    sc_write16le(data + 17, slot->axis_left_trigger >> 5);  // Accelerator = LT
 }
 
 static uint32_t
